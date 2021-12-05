@@ -42,6 +42,7 @@ class Game {
         this.container.style.height = '100%';
         document.body.appendChild(this.container);
 
+        const sfxExt = SFX.supportsAudioType('mp3') ? 'mp3' : 'ogg';
         const game = this;
 
         const options = {
@@ -53,7 +54,10 @@ class Game {
                 "../assets/images/py.jpg",
                 "../assets/images/nz.jpg",
                 "../assets/images/pz.jpg",
-
+                `${this.assetsPath}sfx/bump.${sfxExt}`,
+                `${this.assetsPath}sfx/click.${sfxExt}`,
+                `${this.assetsPath}sfx/engine.${sfxExt}`,
+                `${this.assetsPath}sfx/skid.${sfxExt}`,
             ],
             oncomplete: function () {
                 //game.init();
@@ -75,6 +79,7 @@ class Game {
         this.motion = { forward: 0, turn: 0 };
         this.clock = new THREE.Clock();
 
+        this.initSfx();
 
         this.carGUI = [0, 0, 0, 0, 0];
 
@@ -136,7 +141,6 @@ class Game {
             return;
         }
 
-        //Hide the GUI
         const gui = ["part-select", 'car-parts', 'message', 'play-btn'];
         gui.forEach(function (id) {
             document.getElementById(id).style.display = 'none';
@@ -198,7 +202,34 @@ class Game {
         this.vehicle.chassisBody.angularVelocity.set(0, 0, 0);
     }
 
-
+    initSfx() {
+        this.sfx = {};
+        this.sfx.context = new (window.AudioContext || window.webkitAudioContext)();
+        this.sfx.bump = new SFX({
+            context: this.sfx.context,
+            src: { mp3: `${this.assetsPath}sfx/bump.mp3`, ogg: `${this.assetsPath}sfx/bump.ogg` },
+            loop: false,
+            volume: 0.3
+        });
+        this.sfx.click = new SFX({
+            context: this.sfx.context,
+            src: { mp3: `${this.assetsPath}sfx/click.mp3`, ogg: `${this.assetsPath}sfx/click.ogg` },
+            loop: false,
+            volume: 0.3
+        });
+        this.sfx.engine = new SFX({
+            context: this.sfx.context,
+            src: { mp3: `${this.assetsPath}sfx/engine.mp3`, ogg: `${this.assetsPath}sfx/engine.ogg` },
+            loop: true,
+            volume: 0.1
+        });
+        this.sfx.skid = new SFX({
+            context: this.sfx.context,
+            src: { mp3: `${this.assetsPath}sfx/skid.mp3`, ogg: `${this.assetsPath}sfx/skid.ogg` },
+            loop: false,
+            volume: 0.3
+        });
+    }
 
     init() {
         this.mode = this.modes.INITIALISING;
@@ -233,6 +264,7 @@ class Game {
         this.sun = light;
         this.scene.add(light);
 
+
         this.renderer = new THREE.WebGLRenderer({ antialias: true });
         this.renderer.setPixelRatio(window.devicePixelRatio);
         this.renderer.setSize(window.innerWidth, window.innerHeight);
@@ -255,7 +287,10 @@ class Game {
             this.container.appendChild(this.stats.dom);
         }
 
-
+        this.joystick = new JoyStick({
+            game: this,
+            onMove: this.joystickCallback
+        })
     }
 
     loadAssets() {
@@ -404,10 +439,8 @@ class Game {
             contactEquationStiffness: 1000
         });
 
-        // We must add the contact materials to the world
         world.addContactMaterial(wheelGroundContactMaterial);
 
-        //const chassisShape = this.createCannonConvex(this.proxies.car.geometry);
         const chassisShape = new CANNON.Box(new CANNON.Vec3(1, 0.3, 2));
         const chassisBody = new CANNON.Body({ mass: mass });
         const pos = this.car.chassis.position.clone();
@@ -527,8 +560,13 @@ class Game {
         })
     }
 
+    joystickCallback(forward, turn) {
+        this.js.forward = -forward;
+        this.js.turn = -turn;
+    }
 
     updateDrive(forward = this.js.forward, turn = this.js.turn) {
+        this.sfx.engine.volume = Math.abs(forward) * 0.1;
 
         const maxSteerVal = 0.6;
         const maxForce = 500;
@@ -636,6 +674,196 @@ class Game {
 
         if (this.stats != undefined) this.stats.update();
 
+    }
+}
+
+class SFX {
+    constructor(options) {
+        this.context = options.context;
+        const volume = (options.volume != undefined) ? options.volume : 1.0;
+        this.gainNode = this.context.createGain();
+        this.gainNode.gain.setValueAtTime(volume, this.context.currentTime);
+        this.gainNode.connect(this.context.destination);
+        this._loop = (options.loop == undefined) ? false : options.loop;
+        this.fadeDuration = (options.fadeDuration == undefined) ? 0.5 : options.fadeDuration;
+        this.autoplay = (options.autoplay == undefined) ? false : options.autoplay;
+        this.buffer = null;
+
+        let codec;
+        for (let prop in options.src) {
+            if (SFX.supportsAudioType(prop)) {
+                codec = prop;
+                break;
+            }
+        }
+
+        if (codec != undefined) {
+            this.url = options.src[codec];
+            this.load(this.url);
+        } else {
+            console.warn("Browser does not support any of the supplied audio files");
+        }
+    }
+
+    static supportsAudioType(type) {
+        let audio;
+
+        let formats = {
+            mp3: 'audio/mpeg',
+            wav: 'audio/wav',
+            aif: 'audio/x-aiff',
+            ogg: 'audio/ogg'
+        };
+
+        if (!audio) audio = document.createElement('audio');
+
+        return audio.canPlayType(formats[type] || type);
+    }
+
+    load(url) {
+        const request = new XMLHttpRequest();
+        request.open("GET", url, true);
+        request.responseType = "arraybuffer";
+
+        const sfx = this;
+
+        request.onload = function () {
+            sfx.context.decodeAudioData(
+                request.response,
+                function (buffer) {
+                    if (!buffer) {
+                        console.error('error decoding file data: ' + sfx.url);
+                        return;
+                    }
+                    sfx.buffer = buffer;
+                    if (sfx.autoplay) sfx.play();
+                },
+                function (error) {
+                    console.error('decodeAudioData error', error);
+                }
+            );
+        }
+
+        request.onerror = function () {
+            console.error('SFX Loader: XHR error');
+        }
+
+        request.send();
+    }
+
+    set loop(value) {
+        this._loop = value;
+        if (this.source != undefined) this.source.loop = value;
+    }
+
+    play() {
+        if (this.buffer == null) return;
+        if (this.source != undefined) this.source.stop();
+        this.source = this.context.createBufferSource();
+        this.source.loop = this._loop;
+        this.source.buffer = this.buffer;
+        this.source.connect(this.gainNode);
+        this.source.start(0);
+    }
+
+    set volume(value) {
+        this._volume = value;
+        this.gainNode.gain.setTargetAtTime(value, this.context.currentTime + this.fadeDuration, 0);
+    }
+
+    pause() {
+        if (this.source == undefined) return;
+        this.source.stop();
+    }
+
+    stop() {
+        if (this.source == undefined) return;
+        this.source.stop();
+        delete this.source;
+    }
+}
+
+class JoyStick {
+    constructor(options) {
+        const circle = document.createElement("div");
+        circle.style.cssText = "position:absolute; bottom:35px; width:80px; height:80px; background:rgba(126, 126, 126, 0.5); border:#444 solid medium; border-radius:50%; left:50%; transform:translateX(-50%);";
+        const thumb = document.createElement("div");
+        thumb.style.cssText = "position: absolute; left: 20px; top: 20px; width: 40px; height: 40px; border-radius: 50%; background: #fff;";
+        circle.appendChild(thumb);
+        document.body.appendChild(circle);
+        this.domElement = thumb;
+        this.maxRadius = options.maxRadius || 40;
+        this.maxRadiusSquared = this.maxRadius * this.maxRadius;
+        this.onMove = options.onMove;
+        this.game = options.game;
+        this.origin = { left: this.domElement.offsetLeft, top: this.domElement.offsetTop };
+        this.rotationDamping = options.rotationDamping || 0.06;
+        this.moveDamping = options.moveDamping || 0.01;
+        if (this.domElement != undefined) {
+            const joystick = this;
+            if ('ontouchstart' in window) {
+                this.domElement.addEventListener('touchstart', function (evt) { evt.preventDefault(); joystick.tap(evt); });
+            } else {
+                this.domElement.addEventListener('mousedown', function (evt) { evt.preventDefault(); joystick.tap(evt); });
+            }
+        }
+    }
+
+    getMousePosition(evt) {
+        let clientX = evt.targetTouches ? evt.targetTouches[0].pageX : evt.clientX;
+        let clientY = evt.targetTouches ? evt.targetTouches[0].pageY : evt.clientY;
+        return { x: clientX, y: clientY };
+    }
+
+    tap(evt) {
+        evt = evt || window.event;
+        this.offset = this.getMousePosition(evt);
+        const joystick = this;
+        if ('ontouchstart' in window) {
+            document.ontouchmove = function (evt) { evt.preventDefault(); joystick.move(evt); };
+            document.ontouchend = function (evt) { evt.preventDefault(); joystick.up(evt); };
+        } else {
+            document.onmousemove = function (evt) { evt.preventDefault(); joystick.move(evt); };
+            document.onmouseup = function (evt) { evt.preventDefault(); joystick.up(evt); };
+        }
+    }
+
+    move(evt) {
+        evt = evt || window.event;
+        const mouse = this.getMousePosition(evt);
+        let left = mouse.x - this.offset.x;
+        let top = mouse.y - this.offset.y;
+        //this.offset = mouse;
+
+        const sqMag = left * left + top * top;
+        if (sqMag > this.maxRadiusSquared) {
+            const magnitude = Math.sqrt(sqMag);
+            left /= magnitude;
+            top /= magnitude;
+            left *= this.maxRadius;
+            top *= this.maxRadius;
+        }
+        this.domElement.style.top = `${top + this.domElement.clientHeight / 2}px`;
+        this.domElement.style.left = `${left + this.domElement.clientWidth / 2}px`;
+
+        const forward = -(top - this.origin.top + this.domElement.clientHeight / 2) / this.maxRadius;
+        const turn = (left - this.origin.left + this.domElement.clientWidth / 2) / this.maxRadius;
+
+        if (this.onMove != undefined) this.onMove.call(this.game, forward, turn);
+    }
+
+    up(evt) {
+        if ('ontouchstart' in window) {
+            document.ontouchmove = null;
+            document.touchend = null;
+        } else {
+            document.onmousemove = null;
+            document.onmouseup = null;
+        }
+        this.domElement.style.top = `${this.origin.top}px`;
+        this.domElement.style.left = `${this.origin.left}px`;
+
+        this.onMove.call(this.game, 0, 0);
     }
 }
 
