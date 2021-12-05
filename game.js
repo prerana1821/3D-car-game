@@ -2,11 +2,64 @@ class Game {
     constructor() {
         if (!Detector.webgl) Detector.addGetWebGLMessage();
 
+        this.modes = Object.freeze({
+            NONE: Symbol("none"),
+            PRELOAD: Symbol("preload"),
+            INITIALISING: Symbol("initialising"),
+            CREATING_LEVEL: Symbol("creating_level"),
+            ACTIVE: Symbol("active"),
+            GAMEOVER: Symbol("gameover")
+        });
+        this.mode = this.modes.NONE;
+
+        this.container;
+        this.stats;
+        this.controls;
+        this.camera;
+        this.scene;
+        this.renderer;
+        this.interactive = false;
+        this.levelIndex = 0;
+        this._hints = 0;
+        this.score = 0;
+        this.debug = false;
+        this.debugPhysics = false;
+        this.fixedTimeStep = 1.0 / 60.0;
+        this.js = { forward: 0, turn: 0 };
+        this.assetsPath = "../assets/";
+
+        this.messages = {
+            text: [
+                "Welcome to Skyblade.",
+            ],
+            index: 0
+        }
+
+        if (localStorage && !this.debug) {
+        }
+
         this.container = document.createElement('div');
         this.container.style.height = '100%';
         document.body.appendChild(this.container);
 
         const game = this;
+
+        const options = {
+            assets: [
+                "../assets/rc_time_trial.fbx",
+                "../assets/images/nx.jpg",
+                "../assets/images/px.jpg",
+                "../assets/images/ny.jpg",
+                "../assets/images/py.jpg",
+                "../assets/images/nz.jpg",
+                "../assets/images/pz.jpg",
+
+            ],
+            oncomplete: function () {
+                //game.init();
+                //game.animate();
+            }
+        }
 
         for (let i = 0; i <= 16; i++) {
             let path;
@@ -22,7 +75,6 @@ class Game {
         this.motion = { forward: 0, turn: 0 };
         this.clock = new THREE.Clock();
 
-        this.initSfx();
 
         this.carGUI = [0, 0, 0, 0, 0];
 
@@ -45,13 +97,26 @@ class Game {
 
         document.getElementById('play-btn').onclick = function () { game.startGame(); };
 
+        const preloader = new Preloader(options);
 
         window.onError = function (error) {
             console.error(JSON.stringify(error));
         }
     }
 
-
+    carGUIHandler(part) {
+        //0 - Body, 1 - Aerial, 2 - Engine, 3 - Exhaust, 4 - Wheels
+        this.sfx.click.play();
+        this.carGUI[part]++;
+        if (this.carGUI[part] > 3) this.carGUI[part] = 0;
+        const index = (this.carGUI[part] == 0) ? 0 : (this.carGUI[part] + part * 3 + 1);
+        const layer = document.getElementById('car-parts').childNodes[(6 - part) * 2 - 1];
+        if (index < 10) {
+            layer.attributes.src.value = `${this.assetsPath}images/carparts000${index}.png`;
+        } else {
+            layer.attributes.src.value = `${this.assetsPath}images/carparts00${index}.png`;
+        }
+    }
 
     startGame() {
         this.sfx.click.play();
@@ -113,6 +178,26 @@ class Game {
         });
     }
 
+    resetCar() {
+        this.sfx.skid.play();
+        let checkpoint;
+        let distance = 10000000000;
+        const carPos = this.vehicle.chassisBody.position;
+        this.checkpoints.forEach(function (obj) {
+            const pos = obj.position.clone();
+            pos.y = carPos.y;
+            const dist = pos.distanceTo(carPos);
+            if (dist < distance) {
+                checkpoint = obj;
+                distance = dist;
+            }
+        });
+        this.vehicle.chassisBody.position.copy(checkpoint.position);
+        this.vehicle.chassisBody.quaternion.copy(checkpoint.quaternion);
+        this.vehicle.chassisBody.velocity.set(0, 0, 0);
+        this.vehicle.chassisBody.angularVelocity.set(0, 0, 0);
+    }
+
 
 
     init() {
@@ -135,6 +220,16 @@ class Game {
 
         light.castShadow = true;
 
+        const lightSize = 30;
+        light.shadow.camera.near = 1;
+        light.shadow.camera.far = 500;
+        light.shadow.camera.left = light.shadow.camera.bottom = -lightSize;
+        light.shadow.camera.right = light.shadow.camera.top = lightSize;
+
+        light.shadow.bias = 0.0039;
+        light.shadow.mapSize.width = 1024;
+        light.shadow.mapSize.height = 1024;
+
         this.sun = light;
         this.scene.add(light);
 
@@ -144,6 +239,11 @@ class Game {
         this.renderer.shadowMap.enabled = true;
         this.container.appendChild(this.renderer.domElement);
 
+        if ('ontouchstart' in window) {
+            //this.renderer.domElement.addEventListener('touchstart', function(evt){ game.tap(evt); });
+        } else {
+            //this.renderer.domElement.addEventListener('mousedown', function(evt){ game.tap(evt); });
+        }
 
         this.loadAssets();
 
@@ -155,10 +255,7 @@ class Game {
             this.container.appendChild(this.stats.dom);
         }
 
-        this.joystick = new JoyStick({
-            game: this,
-            onMove: this.joystickCallback
-        })
+
     }
 
     loadAssets() {
@@ -172,7 +269,71 @@ class Game {
                 game.proxies = {};
                 game.checkpoints = [];
 
+                object.traverse(function (child) {
+                    let receiveShadow = true;
+                    if (child.isMesh) {
+                        if (child.name.includes("SkyBox")) {
+                            child.visible = false;
+                        } else if (child.name == "Chassis") {
+                            game.car = { chassis: child, bonnet: [], engine: [], wheel: [], seat: [], xtra: [], selected: {} };
+                            game.followCam = new THREE.Object3D();
+                            game.followCam.position.copy(game.camera.position);
+                            game.scene.add(game.followCam)
+                            game.followCam.parent = child;
+                            game.sun.target = child;
+                            child.castShadow = true;
+                            receiveShadow = false;
+                        } else if (child.name.includes("Bonnet")) {
+                            game.car.bonnet.push(child);
+                            child.visible = false;
+                            child.castShadow = true;
+                            receiveShadow = false;
+                        } else if (child.name.includes("Engine")) {
+                            game.car.engine.push(child);
+                            child.visible = false;
+                            child.castShadow = true;
+                            receiveShadow = false;
+                        } else if (child.name.includes("Seat")) {
+                            game.car.seat.push(child);
+                            child.visible = false;
+                            receiveShadow = false;
+                        } else if (child.name.includes("Wheel") && child.children.length > 0) {
+                            game.car.wheel.push(child);
+                            child.parent = game.scene;
+                            child.visible = false;
+                            child.castShadow = true;
+                            receiveShadow = false;
+                        } else if (child.name.includes("Xtra")) {
+                            game.car.xtra.push(child);
+                            child.visible = false;
+                            child.castShadow = true;
+                            receiveShadow = false;
+                        } else if (child.name.includes("ProxyKitchen")) {
+                            game.proxies.main = child;
+                            child.visible = false;
+                        } else if (child.name == "CarProxyB") {
+                            game.proxies.car = child;
+                            child.visible = false;
+                        } else if (child.name == "ConeProxy") {
+                            game.proxies.cone = child;
+                            child.visible = false;
+                        } else if (child.name == "ShadowBounds") {
+                            child.visible = false;
+                        } else if (child.name == "CarShadow") {
+                            child.visible = false;
+                        }
 
+                        //child.castShadow = true;
+                        child.receiveShadow = receiveShadow;
+                    } else {
+                        if (child.name.includes("Checkpoint")) {
+                            game.checkpoints.push(child);
+                            child.position.y += 1;
+                        }
+                    }
+                });
+
+                game.customiseCar();
 
                 game.assets = object;
                 game.scene.add(object);
@@ -195,6 +356,28 @@ class Game {
                 console.error(error);
             }
         );
+    }
+
+    reset() {
+
+    }
+
+    customiseCar() {
+        const bonnet = this.carGUI[0] - 1;
+        const engine = this.carGUI[2] - 1;
+        const exhaust = this.carGUI[3] - 1;
+        const wheel = this.carGUI[4] - 1;
+        const aerial = this.carGUI[1] - 1;
+        this.car.bonnet[bonnet].visible = true;
+        this.car.engine[engine].visible = true;
+        this.car.seat[exhaust].visible = true;
+        this.car.wheel[wheel].visible = true;
+        this.car.xtra[aerial].visible = true;
+        this.car.selected.bonnet = this.car.bonnet[bonnet];
+        this.car.selected.engine = this.car.engine[engine];
+        this.car.selected.seat = this.car.seat[exhaust];
+        this.car.selected.wheel = this.car.wheel[wheel];
+        this.car.selected.xtra = this.car.xtra[aerial];
     }
 
     updatePhysics() {
@@ -239,11 +422,139 @@ class Game {
         this.scene.add(this.followCam);
         this.followCam.parent = chassisBody.threemesh;
 
+        const options = {
+            radius: 0.3,
+            directionLocal: new CANNON.Vec3(0, -1, 0),
+            suspensionStiffness: 45,
+            suspensionRestLength: 0.4,
+            frictionSlip: 5,
+            dampingRelaxation: 2.3,
+            dampingCompression: 4.5,
+            maxSuspensionForce: 200000,
+            rollInfluence: 0.01,
+            axleLocal: new CANNON.Vec3(-1, 0, 0),
+            chassisConnectionPointLocal: new CANNON.Vec3(1, 1, 0),
+            maxSuspensionTravel: 0.25,
+            customSlidingRotationalSpeed: -30,
+            useCustomSlidingRotationalSpeed: true
+        };
 
+        // Create the vehicle
+        const vehicle = new CANNON.RaycastVehicle({
+            chassisBody: chassisBody,
+            indexRightAxis: 0,
+            indexUpAxis: 1,
+            indexForwardAxis: 2
+        });
+
+        const axlewidth = 0.8;
+        options.chassisConnectionPointLocal.set(axlewidth, 0, -1);
+        vehicle.addWheel(options);
+
+        options.chassisConnectionPointLocal.set(-axlewidth, 0, -1);
+        vehicle.addWheel(options);
+
+        options.chassisConnectionPointLocal.set(axlewidth, 0, 1);
+        vehicle.addWheel(options);
+
+        options.chassisConnectionPointLocal.set(-axlewidth, 0, 1);
+        vehicle.addWheel(options);
+
+        vehicle.addToWorld(world);
+
+        const wheelBodies = [];
+        let index = 0;
+        const wheels = [this.car.selected.wheel];
+        this.car.selected.wheel.children[0].visible = true;
+        this.car.selected.wheel.children[0].castShadow = true;
+        for (let i = 0; i < 3; i++) {
+            let wheel = this.car.selected.wheel.clone();
+            this.scene.add(wheel);
+            wheels.push(wheel);
+        }
+
+        vehicle.wheelInfos.forEach(function (wheel) {
+            const cylinderShape = new CANNON.Cylinder(wheel.radius, wheel.radius, wheel.radius / 2, 20);
+            const wheelBody = new CANNON.Body({ mass: 1 });
+            const q = new CANNON.Quaternion();
+            q.setFromAxisAngle(new CANNON.Vec3(0, 1, 0), Math.PI / 2);
+            wheelBody.addShape(cylinderShape, new CANNON.Vec3(), q);
+            wheelBodies.push(wheelBody);
+            wheelBody.threemesh = wheels[index++];
+        });
+        game.car.wheels = wheelBodies;
+        // Update wheels
+        world.addEventListener('postStep', function () {
+            let index = 0;
+            game.vehicle.wheelInfos.forEach(function (wheel) {
+                game.vehicle.updateWheelTransform(index);
+                const t = wheel.worldTransform;
+                wheelBodies[index].threemesh.position.copy(t.position);
+                wheelBodies[index].threemesh.quaternion.copy(t.quaternion);
+                index++;
+            });
+        });
+
+        this.vehicle = vehicle;
+
+        /*const mainProxy = this.createCannonTrimesh(this.proxies.main.geometry);
+        const mainBody = new CANNON.Body({mass:0});
+        mainBody.position.copy(this.proxies.main.position);
+        mainBody.quaternion.copy(this.proxies.main.quaternion);
+        mainBody.addShape(mainProxy);
+        world.add(mainBody);*/
+
+        this.createColliders();
 
         if (this.debugPhysics) this.debugRenderer = new THREE.CannonDebugRenderer(this.scene, this.world);
     }
 
+    createColliders() {
+        const world = this.world;
+        const scaleAdjust = 0.90;
+        const divisor = 2 / scaleAdjust;
+        this.assets.children.forEach(function (child) {
+            if (child.isMesh && child.name.includes("Collider")) {
+                child.visible = false;
+                const halfExtents = new CANNON.Vec3(child.scale.x / divisor, child.scale.y / divisor, child.scale.z / divisor);
+                const box = new CANNON.Box(halfExtents);
+                const body = new CANNON.Body({ mass: 0 });
+                body.addShape(box);
+                body.position.copy(child.position);
+                body.quaternion.copy(child.quaternion);
+                world.add(body);
+            }
+        })
+    }
+
+
+    updateDrive(forward = this.js.forward, turn = this.js.turn) {
+
+        const maxSteerVal = 0.6;
+        const maxForce = 500;
+        const brakeForce = 10;
+
+        const force = maxForce * forward;
+        const steer = maxSteerVal * turn;
+
+        if (forward != 0) {
+            this.vehicle.setBrake(0, 0);
+            this.vehicle.setBrake(0, 1);
+            this.vehicle.setBrake(0, 2);
+            this.vehicle.setBrake(0, 3);
+
+            this.vehicle.applyEngineForce(force, 0);
+            this.vehicle.applyEngineForce(force, 1);
+        } else {
+            this.vehicle.setBrake(brakeForce, 0);
+            this.vehicle.setBrake(brakeForce, 1);
+            this.vehicle.setBrake(brakeForce, 2);
+            this.vehicle.setBrake(brakeForce, 3);
+        }
+
+        this.vehicle.setSteeringValue(steer, 2);
+        this.vehicle.setSteeringValue(steer, 3);
+    }
 
     onWindowResize() {
         this.camera.aspect = window.innerWidth / window.innerHeight;
@@ -251,6 +562,24 @@ class Game {
 
         this.renderer.setSize(window.innerWidth, window.innerHeight);
 
+    }
+
+    updateCamera() {
+        if (this.followCam === undefined) return;
+        const pos = this.car.chassis.position.clone();
+        pos.y += 0.3;
+        if (this.controls !== undefined) {
+            this.controls.target.copy(pos);
+            this.controls.update();
+        } else {
+            this.camera.position.lerp(this.followCam.getWorldPosition(new THREE.Vector3()), 0.05);
+            this.camera.lookAt(pos);
+        }
+
+        if (this.sun != undefined) {
+            this.sun.position.copy(this.camera.position);
+            this.sun.position.y += 10;
+        }
     }
 
     getAssetsByName(name) {
@@ -307,5 +636,116 @@ class Game {
 
         if (this.stats != undefined) this.stats.update();
 
+    }
+}
+
+class Preloader {
+    constructor(options) {
+        this.assets = {};
+        for (let asset of options.assets) {
+            this.assets[asset] = { loaded: 0, complete: false };
+            this.load(asset);
+        }
+        this.container = options.container;
+
+        if (options.onprogress == undefined) {
+            this.onprogress = onprogress;
+            this.domElement = document.createElement("div");
+            this.domElement.style.position = 'absolute';
+            this.domElement.style.top = '0';
+            this.domElement.style.left = '0';
+            this.domElement.style.width = '100%';
+            this.domElement.style.height = '100%';
+            this.domElement.style.background = '#000';
+            this.domElement.style.opacity = '0.7';
+            this.domElement.style.display = 'flex';
+            this.domElement.style.alignItems = 'center';
+            this.domElement.style.justifyContent = 'center';
+            this.domElement.style.zIndex = '1111';
+            const barBase = document.createElement("div");
+            barBase.style.background = '#aaa';
+            barBase.style.width = '50%';
+            barBase.style.minWidth = '250px';
+            barBase.style.borderRadius = '10px';
+            barBase.style.height = '15px';
+            this.domElement.appendChild(barBase);
+            const bar = document.createElement("div");
+            bar.style.background = '#22a';
+            bar.style.width = '50%';
+            bar.style.borderRadius = '10px';
+            bar.style.height = '100%';
+            bar.style.width = '0';
+            barBase.appendChild(bar);
+            this.progressBar = bar;
+            if (this.container != undefined) {
+                this.container.appendChild(this.domElement);
+            } else {
+                document.body.appendChild(this.domElement);
+            }
+        } else {
+            this.onprogress = options.onprogress;
+        }
+
+        this.oncomplete = options.oncomplete;
+
+        const loader = this;
+        function onprogress(delta) {
+            const progress = delta * 100;
+            loader.progressBar.style.width = `${progress}%`;
+        }
+    }
+
+    checkCompleted() {
+        for (let prop in this.assets) {
+            const asset = this.assets[prop];
+            if (!asset.complete) return false;
+        }
+        return true;
+    }
+
+    get progress() {
+        let total = 0;
+        let loaded = 0;
+
+        for (let prop in this.assets) {
+            const asset = this.assets[prop];
+            if (asset.total == undefined) {
+                loaded = 0;
+                break;
+            }
+            loaded += asset.loaded;
+            total += asset.total;
+        }
+
+        return loaded / total;
+    }
+
+    load(url) {
+        const loader = this;
+        var xobj = new XMLHttpRequest();
+        xobj.overrideMimeType("application/json");
+        xobj.open('GET', url, true);
+        xobj.onreadystatechange = function () {
+            if (xobj.readyState == 4 && xobj.status == "200") {
+                loader.assets[url].complete = true;
+                if (loader.checkCompleted()) {
+                    if (loader.domElement != undefined) {
+                        if (loader.container != undefined) {
+                            loader.container.removeChild(loader.domElement);
+                        } else {
+                            document.body.removeChild(loader.domElement);
+                        }
+                    }
+                    loader.oncomplete();
+                }
+            }
+        };
+        xobj.onprogress = function (e) {
+            const asset = loader.assets[url];
+            asset.loaded = e.loaded;
+            asset.total = e.total;
+            loader.onprogress(loader.progress);
+        }
+        xobj.send(null);
     }
 }
