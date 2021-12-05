@@ -12,11 +12,41 @@
 
   <body>
     <div id="logo"><h2>precodes</h2></div>
+    <div id="part-select">
+      <button>Body</button>
+      <button>Aerial</button>
+      <button>Engine</button>
+      <button>Exhaust</button>
+      <button>Wheels</button>
+    </div>
+    <div id="car-parts">
+      <img src="./assets/images/carparts0001.png" />
+      <img src="./assets/images/carparts0000.png" />
+      <img src="./assets/images/carparts0000.png" />
+      <img src="./assets/images/carparts0000.png" />
+      <img src="./assets/images/carparts0000.png" />
+      <img src="./assets/images/carparts0000.png" />
+    </div>
+    <div id="message">Press the buttons above to customise your car.</div>
+    <button id="play-btn">PLAY</button>
+
+    <button id="reset-btn"><i class="fas fa-car"></i></button>
 
     <script src="./libs/three.min.js"></script>
+    <script src="./libs/inflate.min.js"></script>
+    <script src="./libs/FBXLoader.js"></script>
     <script src="./libs/OrbitControls.js"></script>
     <script src="./libs/Detector.js"></script>
+    <script src="./libs/stats.min.js"></script>
+    <script src="./libs/cannon.min.js"></script>
+    <script src="./libs/CannonDebugRenderer.js"></script>
     <script src="game.js"></script>
+    <script
+      defer
+      src="https://use.fontawesome.com/releases/v5.0.13/js/all.js"
+      integrity="sha384-xymdQtn1n3lH2wcu0qhcdaOpQwyoarkgLVxC/wZ5q7h9gHtxICrpcaSUfygqZGOe"
+      crossorigin="anonymous"
+    ></script>
 
     <script>
       document.addEventListener("DOMContentLoaded", function () {

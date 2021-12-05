@@ -1,7 +1,90 @@
+@import url("https://fonts.googleapis.com/css2?family=Open+Sans:wght@300;400;500;600&display=swap");
+
 body {
-  margin: 0;
+  font-family: "Open Sans", sans-serif;
+  background-color: #000;
+  color: #fff;
+  margin: 0px;
   overflow: hidden;
 }
 
-canvas {
+button {
+  font-family: "Open Sans", sans-serif;
+  background: #f50057;
+  width: 181px;
+  height: 43px;
+  border: none;
+  color: #fff;
+  text-decoration: none;
+  font-size: 20px;
+  margin: 0.3rem;
+  border-radius: 0.2rem;
+  cursor: pointer;
+}
+
+button:hover {
+  color: #fff;
+}
+
+#reset-btn {
+  display: none;
+  position: absolute;
+  left: 15px;
+  bottom: 15px;
+  width: 40px;
+  height: 40px;
+  border: none;
+  border-radius: 50%;
+  background: #f50057;
+  font-size: 25px;
+  color: #fff;
+  padding: 0;
+}
+
+#logo {
+  position: absolute;
+  left: 15px;
+  top: 1px;
+  color: #f50057;
+}
+
+#car-parts {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 343px;
+  height: 220px;
+  transform: translateX(-50%) translateY(-50%);
+}
+
+#car-parts img {
+  position: absolute;
+  left: 0;
+  top: 0;
+}
+
+#part-select {
+  position: absolute;
+  right: 0px;
+  padding: 15px;
+  width: 181px;
+}
+
+#play-btn {
+  position: absolute;
+  bottom: 50px;
+  left: 50%;
+  transform: translateX(-50%);
+}
+
+#message {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  transform: translateX(-50%) translateY(120px);
+  width: 300px;
+  font-family: "Open Sans", sans-serif;
+  color: #fff;
+  font-size: 16px;
+  text-align: center;
 }
